@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@theme {
+  --radius: 0.5rem;
+  --radius-lg: 0.75rem;
+}
+
+/* Svetla tema (podrazumevano) */
+:root {
+  --color-background: #fafafa;
+  --color-foreground: #171717;
+  --color-card: #ffffff;
+  --color-card-foreground: #171717;
+  --color-primary: #0f766e;
+  --color-primary-foreground: #f0fdfa;
+  --color-muted: #f4f4f5;
+  --color-muted-foreground: #71717a;
+  --color-border: #e4e4e7;
+  --color-input: #e4e4e7;
+  --color-ring: #0f766e;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #fff;
+  --color-ring-offset: #fafafa;
+  --shadow-elevation: 0 1px 3px 0 rgb(0 0 0 / 0.05);
+}
+
+/* Tamna tema */
+[data-theme="dark"] {
+  --color-background: #0c0c0c;
+  --color-foreground: #fafafa;
+  --color-card: #171717;
+  --color-card-foreground: #fafafa;
+  --color-primary: #14b8a6;
+  --color-primary-foreground: #042f2e;
+  --color-muted: #262626;
+  --color-muted-foreground: #a1a1aa;
+  --color-border: #262626;
+  --color-input: #262626;
+  --color-ring: #14b8a6;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #fff;
+  --color-ring-offset: #0c0c0c;
+  --shadow-elevation: 0 1px 3px 0 rgb(0 0 0 / 0.3);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+input[type="date"],
+input[type="time"],
+input[type="text"],
+select {
+  font-family: inherit;
+}
