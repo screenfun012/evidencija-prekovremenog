@@ -67,3 +67,14 @@ input[type="text"],
 select {
   font-family: inherit;
 }
+
+/* WebView2 na Windows: omogući native date/time picker */
+input[type="date"],
+input[type="time"] {
+  color-scheme: light;
+  min-height: 2.25rem;
+}
+[data-theme="dark"] input[type="date"],
+[data-theme="dark"] input[type="time"] {
+  color-scheme: dark;
+}

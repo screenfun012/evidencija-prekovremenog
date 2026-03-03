@@ -9,6 +9,7 @@ import { SettingsWorkers } from "@/components/SettingsWorkers";
 import { ArchiveView } from "@/components/ArchiveView";
 import { WorkerMultiSelect } from "@/components/WorkerMultiSelect";
 import { formatHours, roundHours } from "@/lib/utils";
+import { timeDiffHours } from "@/lib/dateUtils";
 import { loadState, saveState, type StoredState } from "@/lib/storage";
 import { processTableA, downloadBlob, type ProcessOutcome } from "@/lib/excelImport";
 import { exportCardsToExcel, downloadExcel } from "@/lib/excelExport";
@@ -215,15 +216,21 @@ export default function App() {
       alert("Izaberite radnika pre čuvanja.");
       return;
     }
-    const totalHours = operations.reduce((acc, op) => acc + op.ukupnoVreme, 0);
-    if (operations.length === 0 || totalHours === 0) {
+    const opsWithRecalc = operations.map((op) => {
+      if (op.pocetak && op.kraj && op.ukupnoVreme === 0) {
+        return { ...op, ukupnoVreme: roundHours(timeDiffHours(op.pocetak, op.kraj)) };
+      }
+      return op;
+    });
+    const totalHours = opsWithRecalc.reduce((acc, op) => acc + op.ukupnoVreme, 0);
+    if (opsWithRecalc.length === 0 || totalHours === 0) {
       alert("Dodajte bar jednu operaciju sa popunjenim vremenom (početak i kraj) pre čuvanja.");
       return;
     }
     const month = editingCardId
-      ? getMonthFromOperations(operations)
+      ? getMonthFromOperations(opsWithRecalc)
       : currentMonth;
-    const roundedOps = operations.map((op) => ({ ...op, ukupnoVreme: roundHours(op.ukupnoVreme) }));
+    const roundedOps = opsWithRecalc.map((op) => ({ ...op, ukupnoVreme: roundHours(op.ukupnoVreme) }));
     if (editingCardId) {
       setCards((prev) =>
         prev.map((c) =>

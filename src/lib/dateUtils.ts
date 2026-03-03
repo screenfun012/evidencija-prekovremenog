@@ -7,8 +7,12 @@ export function isWeekend(dateStr: string): boolean {
 }
 
 export function parseTimeToMinutes(timeStr: string): number {
-  const [h, m] = timeStr.split(":").map(Number);
-  return (h ?? 0) * 60 + (m ?? 0);
+  if (!timeStr?.trim()) return 0;
+  const parts = timeStr.trim().split(":");
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1] ?? "0", 10);
+  if (Number.isNaN(h)) return 0;
+  return (h % 24) * 60 + (Number.isNaN(m) ? 0 : Math.min(59, Math.max(0, m)));
 }
 
 export function timeDiffHours(start: string, end: string): number {

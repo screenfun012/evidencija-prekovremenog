@@ -1,5 +1,5 @@
-import { useCallback } from "react";
-import { Trash2 } from "lucide-react";
+import { useCallback, useRef } from "react";
+import { Trash2, Calendar, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +15,29 @@ interface OperationRowProps {
 
 const WEEKEND_MSG = "Subota i nedelja nisu dozvoljeni. Izaberite radni dan.";
 
+function normalizeTime(s: string): string {
+  s = s.trim();
+  if (!s) return "";
+  const m = /^(\d{1,2}):?(\d{0,2})$/.exec(s);
+  if (!m) return s;
+  const h = Math.min(23, Math.max(0, parseInt(m[1], 10) || 0));
+  const min = Math.min(59, Math.max(0, parseInt(m[2], 10) || 0));
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+function isValidTime(s: string): boolean {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s);
+  if (!m) return false;
+  const h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  return h >= 0 && h <= 23 && min >= 0 && min <= 59;
+}
+
 export function OperationRow({ operation, onChange, onRemove }: OperationRowProps) {
+  const dateRef = useRef<HTMLInputElement>(null);
+  const pocetakRef = useRef<HTMLInputElement>(null);
+  const krajRef = useRef<HTMLInputElement>(null);
+
   const handleDatumChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const v = e.target.value;
@@ -32,19 +54,54 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
     [operation, onChange]
   );
 
+  const recalcTime = useCallback(
+    (pocetak: string, kraj: string) => {
+      if (pocetak && kraj && isValidTime(pocetak) && isValidTime(kraj)) {
+        return roundHours(timeDiffHours(pocetak, kraj));
+      }
+      return operation.ukupnoVreme;
+    },
+    [operation.ukupnoVreme]
+  );
+
   const handleTimeChange = useCallback(
     (field: "pocetak" | "kraj") => (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
       const next = { ...operation, [field]: value };
       const start = field === "pocetak" ? value : operation.pocetak;
       const end = field === "kraj" ? value : operation.kraj;
-      if (start && end) {
-        next.ukupnoVreme = roundHours(timeDiffHours(start, end));
-      }
+      next.ukupnoVreme = recalcTime(start, end);
       onChange(next);
     },
-    [operation, onChange]
+    [operation, onChange, recalcTime]
   );
+
+  const handleTimeBlur = useCallback(() => {
+    let pocetak = pocetakRef.current?.value ?? operation.pocetak;
+    let kraj = krajRef.current?.value ?? operation.kraj;
+    pocetak = normalizeTime(pocetak) || pocetak;
+    kraj = normalizeTime(kraj) || kraj;
+    const newTotal = recalcTime(pocetak, kraj);
+    if (newTotal !== operation.ukupnoVreme || pocetak !== operation.pocetak || kraj !== operation.kraj) {
+      onChange({ ...operation, pocetak, kraj, ukupnoVreme: newTotal });
+    }
+  }, [operation, onChange, recalcTime]);
+
+  const openDatePicker = useCallback(() => {
+    try {
+      (dateRef.current as HTMLInputElement & { showPicker?: () => void })?.showPicker?.();
+    } catch {
+      dateRef.current?.focus();
+    }
+  }, []);
+
+  const openTimePicker = useCallback((ref: React.RefObject<HTMLInputElement | null>) => {
+    try {
+      (ref.current as HTMLInputElement & { showPicker?: () => void })?.showPicker?.();
+    } catch {
+      ref.current?.focus();
+    }
+  }, []);
 
   return (
     <div
@@ -55,18 +112,25 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
     >
       <div className="space-y-1.5">
         <Label>Datum</Label>
-        <Input
-          type="date"
-          value={operation.datum}
-          onChange={handleDatumChange}
-          onBlur={(e) => {
-            const v = e.target.value;
-            if (v && isWeekend(v)) {
-              alert(WEEKEND_MSG);
-              e.target.value = operation.datum;
-            }
-          }}
-        />
+        <div className="flex gap-1">
+          <Input
+            ref={dateRef}
+            type="date"
+            value={operation.datum}
+            onChange={handleDatumChange}
+            onBlur={(e) => {
+              const v = e.target.value;
+              if (v && isWeekend(v)) {
+                alert(WEEKEND_MSG);
+                onChange({ ...operation, datum: operation.datum });
+              }
+            }}
+            className="flex-1 min-w-0"
+          />
+          <Button type="button" variant="outline" size="icon" onClick={openDatePicker} title="Izaberi datum">
+            <Calendar className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
       <div className="space-y-1.5">
         <Label>Napomena</Label>
@@ -86,19 +150,35 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
       </div>
       <div className="space-y-1.5">
         <Label>Početak</Label>
-        <Input
-          type="time"
-          value={operation.pocetak}
-          onChange={handleTimeChange("pocetak")}
-        />
+        <div className="flex gap-1">
+          <Input
+            ref={pocetakRef}
+            type="time"
+            value={operation.pocetak}
+            onChange={handleTimeChange("pocetak")}
+            onBlur={handleTimeBlur}
+            className="flex-1 min-w-0"
+          />
+          <Button type="button" variant="outline" size="icon" onClick={() => openTimePicker(pocetakRef)} title="Izaberi vreme">
+            <Clock className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
       <div className="space-y-1.5">
         <Label>Kraj</Label>
-        <Input
-          type="time"
-          value={operation.kraj}
-          onChange={handleTimeChange("kraj")}
-        />
+        <div className="flex gap-1">
+          <Input
+            ref={krajRef}
+            type="time"
+            value={operation.kraj}
+            onChange={handleTimeChange("kraj")}
+            onBlur={handleTimeBlur}
+            className="flex-1 min-w-0"
+          />
+          <Button type="button" variant="outline" size="icon" onClick={() => openTimePicker(krajRef)} title="Izaberi vreme">
+            <Clock className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
       <div className="space-y-1.5">
         <Label>Ukupno vreme</Label>
