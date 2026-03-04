@@ -24,14 +24,15 @@ function parseTimeToDecimalHours(val: unknown): number {
   return Number.isNaN(n) ? 0 : n;
 }
 
-/** Decimalni sati -> HH:MM:SS (ili negativno) */
+/** Decimalni sati -> HH:MM:SS (sekunde 0–59, bez 60 zbog floating-point greške) */
 function decimalHoursToTimeStr(hours: number): string {
   const sign = hours < 0 ? "-" : "";
   const abs = Math.abs(hours);
-  const h = Math.floor(abs);
-  const remainder = (abs - h) * 60;
-  const m = Math.floor(remainder);
-  const s = Math.round((remainder - m) * 60);
+  const totalSeconds = Math.round(abs * 3600);
+  const h = Math.floor(totalSeconds / 3600);
+  const remainderSec = totalSeconds % 3600;
+  const m = Math.floor(remainderSec / 60);
+  const s = remainderSec % 60;
   return `${sign}${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 

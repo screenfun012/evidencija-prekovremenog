@@ -26,10 +26,12 @@ function formatDateSerbian(dateStr: string): string {
   }
 }
 
+/** Format za tabelu: "1:2" (sati:minuti). */
 function formatDuration(hours: number): string {
-  if (hours <= 0 || Number.isNaN(hours)) return "0";
-  const h = Math.round(hours * 100) / 100;
-  return h % 1 === 0 ? `${h}` : h.toFixed(2);
+  if (hours <= 0 || Number.isNaN(hours)) return "0:0";
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  return m === 0 ? `${h}:0` : `${h}:${m}`;
 }
 
 function formatTimeDisplay(timeStr: string): string {

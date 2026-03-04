@@ -365,7 +365,11 @@ export default function App() {
     [currentMonthCards, workersForImport]
   );
 
-  const totalHours = operations.reduce((acc, op) => acc + op.ukupnoVreme, 0);
+  const totalHoursForm = operations.reduce((acc, op) => acc + op.ukupnoVreme, 0);
+  const totalHoursAllCards = currentMonthCards.reduce(
+    (acc, card) => acc + card.operations.reduce((a, op) => a + op.ukupnoVreme, 0),
+    0
+  );
 
   const toggleTheme = useCallback(() => {
     setTheme((t) => (t === "light" ? "dark" : "light"));
@@ -504,7 +508,7 @@ export default function App() {
             <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] pt-4">
               <span className="text-sm font-medium">Sati (ukupno):</span>
               <span className="text-lg font-semibold text-[var(--color-primary)]">
-                {formatHours(totalHours)}
+                {formatHours(totalHoursForm)}
               </span>
             </div>
             <div className="flex flex-wrap gap-2 pt-2">
@@ -675,8 +679,8 @@ export default function App() {
           <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-6">
               <div>
-                <span className="text-sm text-[var(--color-muted-foreground)]">Ukupno sati (formular):</span>
-                <span className="ml-2 font-semibold">{formatHours(totalHours)}</span>
+                <span className="text-sm text-[var(--color-muted-foreground)]">Ukupno sati:</span>
+                <span className="ml-2 font-semibold">{formatHours(totalHoursAllCards)}</span>
               </div>
               <div>
                 <span className="text-sm text-[var(--color-muted-foreground)]">Kartice (ovaj mesec):</span>
