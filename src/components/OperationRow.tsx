@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isWeekend, timeDiffHours } from "@/lib/dateUtils";
-import { cn, roundHours } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { Operation } from "@/types";
 
 interface OperationRowProps {
@@ -56,7 +56,7 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
   const recalcTime = useCallback(
     (pocetak: string, kraj: string) => {
       if (pocetak && kraj && isValidTime(pocetak) && isValidTime(kraj)) {
-        return roundHours(timeDiffHours(pocetak, kraj));
+        return timeDiffHours(pocetak, kraj);
       }
       return operation.ukupnoVreme;
     },
@@ -147,7 +147,7 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
       <div className="space-y-1.5">
         <Label>Ukupno vreme</Label>
         <div className="flex h-9 items-center rounded-md border border-[var(--color-input)] bg-[var(--color-muted)]/50 px-3 text-sm">
-          {roundHours(operation.ukupnoVreme)} h
+          {operation.ukupnoVreme % 1 === 0 ? `${operation.ukupnoVreme} h` : `${operation.ukupnoVreme.toFixed(2)} h`}
         </div>
       </div>
       <div className="flex items-end pb-0 sm:pb-0">

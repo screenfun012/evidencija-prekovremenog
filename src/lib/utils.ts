@@ -5,14 +5,9 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Zaokružuje sate: ≥ 0.5 na gore (9.5 → 10), inače na dole (9.49 → 9). */
-export function roundHours(hours: number): number {
-  if (Number.isNaN(hours) || !Number.isFinite(hours)) return 0;
-  return Math.round(hours);
-}
-
 export function formatHours(hours: number): string {
+  if (Number.isNaN(hours) || !Number.isFinite(hours)) return "0 h";
   if (hours === 0) return "0 h";
-  const rounded = roundHours(hours);
-  return `${rounded} h`;
+  const h = Math.round(hours * 100) / 100;
+  return h % 1 === 0 ? `${h} h` : `${h.toFixed(2)} h`;
 }

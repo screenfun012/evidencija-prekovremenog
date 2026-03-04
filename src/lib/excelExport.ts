@@ -2,7 +2,6 @@ import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { format, parseISO } from "date-fns";
 import type { WorkerCard } from "@/types";
-import { roundHours } from "@/lib/utils";
 
 const HEADER_ROW = 1;
 const DATA_START_ROW = 2;
@@ -28,9 +27,9 @@ function formatDateSerbian(dateStr: string): string {
 }
 
 function formatDuration(hours: number): string {
-  if (hours <= 0 || Number.isNaN(hours)) return "0:00";
-  const h = roundHours(hours);
-  return `${h}:00`;
+  if (hours <= 0 || Number.isNaN(hours)) return "0";
+  const h = Math.round(hours * 100) / 100;
+  return h % 1 === 0 ? `${h}` : h.toFixed(2);
 }
 
 function formatTimeDisplay(timeStr: string): string {
@@ -153,7 +152,7 @@ async function buildSheet(
   // --- Values row ---
   const valRow = satiLabelRow + 1;
   const vr = ws.getRow(valRow);
-  const ukupnoSati = roundHours(card.operations.reduce((acc, op) => acc + op.ukupnoVreme, 0));
+  const ukupnoSati = Math.round(card.operations.reduce((acc, op) => acc + op.ukupnoVreme, 0) * 100) / 100;
   vr.getCell(1).value = ukupnoSati;
   vr.getCell(1).font = { bold: true };
   applyHighlight(vr, COL_COUNT);

@@ -8,7 +8,7 @@ import { OperationRow } from "@/components/OperationRow";
 import { SettingsWorkers } from "@/components/SettingsWorkers";
 import { ArchiveView } from "@/components/ArchiveView";
 import { WorkerMultiSelect } from "@/components/WorkerMultiSelect";
-import { formatHours, roundHours } from "@/lib/utils";
+import { formatHours } from "@/lib/utils";
 import { timeDiffHours } from "@/lib/dateUtils";
 import { loadState, saveState, type StoredState } from "@/lib/storage";
 import { processTableA, downloadBlob, type ProcessOutcome } from "@/lib/excelImport";
@@ -218,7 +218,7 @@ export default function App() {
     }
     const opsWithRecalc = operations.map((op) => {
       if (op.pocetak && op.kraj && op.ukupnoVreme === 0) {
-        return { ...op, ukupnoVreme: roundHours(timeDiffHours(op.pocetak, op.kraj)) };
+        return { ...op, ukupnoVreme: timeDiffHours(op.pocetak, op.kraj) };
       }
       return op;
     });
@@ -230,7 +230,7 @@ export default function App() {
     const month = editingCardId
       ? getMonthFromOperations(opsWithRecalc)
       : currentMonth;
-    const roundedOps = opsWithRecalc.map((op) => ({ ...op, ukupnoVreme: roundHours(op.ukupnoVreme) }));
+    const opsToSave = opsWithRecalc.map((op) => ({ ...op, ukupnoVreme: op.ukupnoVreme }));
     if (editingCardId) {
       setCards((prev) =>
         prev.map((c) =>
@@ -239,7 +239,7 @@ export default function App() {
                 ...c,
                 workerName: worker.name,
                 month,
-                operations: roundedOps,
+                operations: opsToSave,
                 posleSmeneHours,
               }
             : c
@@ -254,7 +254,7 @@ export default function App() {
           workerId: worker.id,
           workerName: worker.name,
           month,
-          operations: roundedOps,
+          operations: opsToSave,
           posleSmeneHours,
           archived: false,
         },
