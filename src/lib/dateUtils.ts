@@ -21,3 +21,29 @@ export function timeDiffHours(start: string, end: string): number {
   if (endMin < startMin) endMin += 24 * 60; // next day
   return (endMin - startMin) / 60;
 }
+
+export interface OperationTotals {
+  workDays: number;
+  weekend: number;
+  total: number;
+}
+
+/** Računa ukupno vreme po radnim danima i vikendu iz operacija. */
+export function computeTotals(
+  operations: { datum: string; ukupnoVreme: number }[]
+): OperationTotals {
+  let workDays = 0;
+  let weekend = 0;
+  for (const op of operations) {
+    if (!op.datum) {
+      workDays += op.ukupnoVreme;
+      continue;
+    }
+    if (isWeekend(op.datum)) {
+      weekend += op.ukupnoVreme;
+    } else {
+      workDays += op.ukupnoVreme;
+    }
+  }
+  return { workDays, weekend, total: workDays + weekend };
+}

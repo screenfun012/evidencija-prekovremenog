@@ -3,7 +3,7 @@ import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { isWeekend, timeDiffHours } from "@/lib/dateUtils";
+import { timeDiffHours } from "@/lib/dateUtils";
 import { cn, formatHours } from "@/lib/utils";
 import type { Operation } from "@/types";
 
@@ -12,8 +12,6 @@ interface OperationRowProps {
   onChange: (op: Operation) => void;
   onRemove: () => void;
 }
-
-const WEEKEND_MSG = "Subota i nedelja nisu dozvoljeni. Izaberite radni dan.";
 
 function normalizeTime(s: string): string {
   s = s.trim();
@@ -40,15 +38,7 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
   const handleDatumChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const v = e.target.value;
-      if (!v) {
-        onChange({ ...operation, datum: "" });
-        return;
-      }
-      if (isWeekend(v)) {
-        alert(WEEKEND_MSG);
-        return;
-      }
-      onChange({ ...operation, datum: v });
+      onChange({ ...operation, datum: v || "" });
     },
     [operation, onChange]
   );
@@ -99,13 +89,6 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
           type="date"
           value={operation.datum}
           onChange={handleDatumChange}
-          onBlur={(e) => {
-            const v = e.target.value;
-            if (v && isWeekend(v)) {
-              alert(WEEKEND_MSG);
-              onChange({ ...operation, datum: operation.datum });
-            }
-          }}
         />
       </div>
       <div className="space-y-1.5">

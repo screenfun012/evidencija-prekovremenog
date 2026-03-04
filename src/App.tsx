@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Settings, Upload, FileSpreadsheet, Save, Pencil, Moon, Sun, Download, CheckCircle, AlertTriangle, Calendar, Archive, Trash2 } from "lucide-react";
+import { Settings, Upload, FileSpreadsheet, Save, Pencil, Moon, Sun, Download, CheckCircle, AlertTriangle, Calendar, Archive, Trash2, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -9,11 +9,12 @@ import { SettingsWorkers } from "@/components/SettingsWorkers";
 import { ArchiveView } from "@/components/ArchiveView";
 import { WorkerMultiSelect } from "@/components/WorkerMultiSelect";
 import { formatHours } from "@/lib/utils";
-import { timeDiffHours } from "@/lib/dateUtils";
-import { loadState, saveState, type StoredState } from "@/lib/storage";
+import { timeDiffHours, computeTotals } from "@/lib/dateUtils";
+import { loadState, saveState, migrateState, type StoredState } from "@/lib/storage";
+import { useToast } from "@/components/Toast";
 import { processTableA, downloadBlob, type ProcessOutcome } from "@/lib/excelImport";
 import { exportCardsToExcel, downloadExcel } from "@/lib/excelExport";
-import type { Worker, Operation, WorkerCard } from "@/types";
+import type { Worker, Operation, WorkerCard, Company } from "@/types";
 
 function getCurrentMonth(): string {
   const now = new Date();
@@ -32,8 +33,10 @@ function getMonthFromOperations(operations: Operation[]): string {
 }
 
 function toStoredState(
+  companies: Company[],
   workers: Worker[],
   cards: WorkerCard[],
+  selectedCompanyId: string | null,
   selectedWorkerId: string | null,
   operations: Operation[],
   posleSmeneHours: number | null,
@@ -41,11 +44,13 @@ function toStoredState(
   theme: string
 ): StoredState {
   return {
-    workers: workers.map((w) => ({ id: w.id, name: w.name })),
+    companies: companies.map((c) => ({ id: c.id, name: c.name })),
+    workers: workers.map((w) => ({ id: w.id, name: w.name, companyId: w.companyId })),
     cards: cards.map((c) => ({
       id: c.id,
       workerId: c.workerId,
       workerName: c.workerName,
+      companyId: c.companyId,
       month: c.month,
       operations: c.operations.map((op) => ({
         id: op.id,
@@ -59,6 +64,7 @@ function toStoredState(
       posleSmeneHours: c.posleSmeneHours,
       archived: c.archived ?? false,
     })),
+    selectedCompanyId,
     selectedWorkerId,
     operations: operations.map((op) => ({
       id: op.id,
@@ -76,20 +82,32 @@ function toStoredState(
 }
 
 function fromStoredState(s: StoredState): {
+  companies: Company[];
   workers: Worker[];
   cards: WorkerCard[];
+  selectedCompanyId: string | null;
   selectedWorkerId: string | null;
   operations: Operation[];
   posleSmeneHours: number | null;
   editingCardId: string | null;
   theme: string;
 } {
+  const companies: Company[] = (s.companies ?? []).map((c) => ({ id: c.id, name: c.name }));
+  if (companies.length === 0) {
+    companies.push({ id: "mr", name: "MR Engines" }, { id: "tiki", name: "TikiVent" });
+  }
   return {
-    workers: s.workers.map((w) => ({ id: w.id, name: w.name })),
+    companies,
+    workers: (s.workers ?? []).map((w) => ({
+      id: w.id,
+      name: w.name,
+      companyId: w.companyId ?? "mr",
+    })),
     cards: (s.cards ?? []).map((c) => ({
       id: c.id,
       workerId: c.workerId,
       workerName: c.workerName,
+      companyId: c.companyId ?? "mr",
       month: c.month,
       operations: c.operations.map((op) => ({
         id: op.id,
@@ -103,6 +121,7 @@ function fromStoredState(s: StoredState): {
       posleSmeneHours: c.posleSmeneHours,
       archived: c.archived ?? false,
     })),
+    selectedCompanyId: s.selectedCompanyId ?? companies[0]?.id ?? "mr",
     selectedWorkerId: s.selectedWorkerId,
     operations: (s.operations ?? []).map((op) => ({
       id: op.id,
@@ -120,39 +139,54 @@ function fromStoredState(s: StoredState): {
 }
 
 export default function App() {
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [cards, setCards] = useState<WorkerCard[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [posleSmeneHours, setPosleSmeneHours] = useState<number | null>(null);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<"current" | "archive">("current");
 
   const currentMonth = getCurrentMonth();
+  const workersForCompany = useMemo(
+    () => workers.filter((w) => w.companyId === selectedCompanyId),
+    [workers, selectedCompanyId]
+  );
+  const cardsForCompany = useMemo(
+    () => cards.filter((c) => c.companyId === selectedCompanyId),
+    [cards, selectedCompanyId]
+  );
   const currentMonthCards = useMemo(
-    () => cards.filter((c) => c.month === currentMonth && !c.archived),
-    [cards, currentMonth]
+    () => cardsForCompany.filter((c) => c.month === currentMonth && !c.archived),
+    [cardsForCompany, currentMonth]
   );
   const archiveCards = useMemo(
-    () => cards.filter((c) => c.archived === true),
-    [cards]
+    () => cardsForCompany.filter((c) => c.archived === true),
+    [cardsForCompany]
   );
   const cardCountByWorkerId = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const c of cards) {
+    for (const c of cardsForCompany) {
       map[c.workerId] = (map[c.workerId] ?? 0) + 1;
     }
     return map;
-  }, [cards]);
+  }, [cardsForCompany]);
+  const selectedCompany = companies.find((c) => c.id === selectedCompanyId);
+  const { toast } = useToast();
 
   useEffect(() => {
     loadState().then((s) => {
       const data = fromStoredState(s);
+      setCompanies(data.companies);
       setWorkers(data.workers);
       setCards(data.cards);
+      setSelectedCompanyId(data.selectedCompanyId);
       setSelectedWorkerId(data.selectedWorkerId);
       setOperations(data.operations);
       setPosleSmeneHours(data.posleSmeneHours);
@@ -169,8 +203,10 @@ export default function App() {
 
   const persist = useCallback(() => {
     const state = toStoredState(
+      companies,
       workers,
       cards,
+      selectedCompanyId,
       selectedWorkerId,
       operations,
       posleSmeneHours,
@@ -178,12 +214,20 @@ export default function App() {
       theme
     );
     saveState(state);
-  }, [workers, cards, selectedWorkerId, operations, posleSmeneHours, editingCardId, theme]);
+  }, [companies, workers, cards, selectedCompanyId, selectedWorkerId, operations, posleSmeneHours, editingCardId, theme]);
 
   useEffect(() => {
     if (!loaded) return;
     persist();
-  }, [loaded, persist, workers, cards, selectedWorkerId, operations, posleSmeneHours, editingCardId, theme]);
+  }, [loaded, persist, companies, workers, cards, selectedCompanyId, selectedWorkerId, operations, posleSmeneHours, editingCardId, theme]);
+
+  const setSelectedCompany = useCallback((id: string) => {
+    setSelectedCompanyId(id);
+    setSelectedWorkerId(null);
+    setOperations([]);
+    setEditingCardId(null);
+    setPosleSmeneHours(null);
+  }, []);
 
   const addOperation = useCallback(() => {
     setOperations((prev) => [
@@ -211,9 +255,9 @@ export default function App() {
   }, []);
 
   const handleSave = useCallback(() => {
-    const worker = workers.find((w) => w.id === selectedWorkerId);
-    if (!worker) {
-      alert("Izaberite radnika pre čuvanja.");
+    const worker = workersForCompany.find((w) => w.id === selectedWorkerId);
+    if (!worker || !selectedCompanyId) {
+      toast("Izaberite radnika pre čuvanja.", "error");
       return;
     }
     const opsWithRecalc = operations.map((op) => {
@@ -224,7 +268,7 @@ export default function App() {
     });
     const totalHours = opsWithRecalc.reduce((acc, op) => acc + op.ukupnoVreme, 0);
     if (opsWithRecalc.length === 0 || totalHours === 0) {
-      alert("Dodajte bar jednu operaciju sa popunjenim vremenom (početak i kraj) pre čuvanja.");
+      toast("Dodajte bar jednu operaciju sa popunjenim vremenom (početak i kraj) pre čuvanja.", "error");
       return;
     }
     const month = editingCardId
@@ -253,6 +297,7 @@ export default function App() {
           id: generateId(),
           workerId: worker.id,
           workerName: worker.name,
+          companyId: selectedCompanyId,
           month,
           operations: opsToSave,
           posleSmeneHours,
@@ -263,7 +308,8 @@ export default function App() {
     setOperations([]);
     setPosleSmeneHours(null);
     setSelectedWorkerId(null);
-  }, [workers, selectedWorkerId, operations, posleSmeneHours, editingCardId, currentMonth]);
+    toast("Kartica sačuvana.", "success");
+  }, [workersForCompany, selectedWorkerId, selectedCompanyId, operations, posleSmeneHours, editingCardId, currentMonth, toast]);
 
   const handleEdit = useCallback((card: WorkerCard) => {
     setSelectedWorkerId(card.workerId);
@@ -281,16 +327,34 @@ export default function App() {
 
   const handleExport = useCallback(async () => {
     if (currentMonthCards.length === 0) {
-      alert("Nema sačuvanih kartica za tekući mesec. Sačuvajte bar jednu karticu za ovaj mesec.");
+      toast("Nema sačuvanih kartica za tekući mesec. Sačuvajte bar jednu karticu za ovaj mesec.", "error");
       return;
     }
-    const wb = await exportCardsToExcel(currentMonthCards);
-    await downloadExcel(wb, `Tabela_B_${currentMonth.replace("-", "_")}.xlsx`);
-  }, [currentMonthCards, currentMonth]);
+    const companySlug = (selectedCompany?.name ?? "firma").replace(/\s+/g, "_");
+    const wb = await exportCardsToExcel(currentMonthCards, selectedCompany?.name ?? "");
+    await downloadExcel(wb, `Tabela_B_${companySlug}_${currentMonth.replace("-", "_")}.xlsx`);
+    toast("Excel izvezen.", "success");
+  }, [currentMonthCards, currentMonth, selectedCompany?.name, toast]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        handleSave();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "e") {
+        e.preventDefault();
+        handleExport();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleSave, handleExport]);
 
   const addWorker = useCallback((name: string) => {
-    setWorkers((prev) => [...prev, { id: generateId(), name: name.trim() }]);
-  }, []);
+    if (!selectedCompanyId) return;
+    setWorkers((prev) => [...prev, { id: generateId(), name: name.trim(), companyId: selectedCompanyId }]);
+  }, [selectedCompanyId]);
 
   const editWorker = useCallback((id: string, name: string) => {
     setWorkers((prev) => prev.map((w) => (w.id === id ? { ...w, name } : w)));
@@ -333,14 +397,51 @@ export default function App() {
     }
   }, [editingCardId]);
 
+  const handleExportBackup = useCallback(() => {
+    const state = toStoredState(
+      companies,
+      workers,
+      cards,
+      selectedCompanyId,
+      selectedWorkerId,
+      operations,
+      posleSmeneHours,
+      editingCardId,
+      theme
+    );
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `evidencija_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast("Backup izvezen.", "success");
+  }, [companies, workers, cards, selectedCompanyId, selectedWorkerId, operations, posleSmeneHours, editingCardId, theme, toast]);
+
+  const handleImportBackup = useCallback((raw: StoredState) => {
+    const state = migrateState(raw);
+    const data = fromStoredState(state);
+    setCompanies(data.companies);
+    setWorkers(data.workers);
+    setCards(data.cards);
+    setSelectedCompanyId(data.selectedCompanyId);
+    setSelectedWorkerId(data.selectedWorkerId);
+    setOperations(data.operations);
+    setPosleSmeneHours(data.posleSmeneHours);
+    setEditingCardId(data.editingCardId);
+    if (data.theme) setTheme((data.theme === "dark" ? "dark" : "light") as "light" | "dark");
+    toast("Backup uvezen.", "success");
+  }, [toast]);
+
   const [importResult, setImportResult] = useState<ProcessOutcome | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [workersForImport, setWorkersForImport] = useState<string[]>([]);
 
   const openImportDialog = useCallback(() => {
-    setWorkersForImport(workers.map((w) => w.name));
+    setWorkersForImport(workersForCompany.map((w) => w.name));
     setImportDialogOpen(true);
-  }, [workers]);
+  }, [workersForCompany]);
 
   const handleFileImport = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -348,11 +449,11 @@ export default function App() {
       e.target.value = "";
       if (!file) return;
       if (workersForImport.length === 0) {
-        alert("Izaberite bar jednog radnika za obradu.");
+        toast("Izaberite bar jednog radnika za obradu.", "error");
         return;
       }
       if (currentMonthCards.length === 0) {
-        alert("Nema sačuvanih kartica za tekući mesec. Sačuvajte bar jednu karticu pre obrade Tabele A.");
+        toast("Nema sačuvanih kartica za tekući mesec. Sačuvajte bar jednu karticu pre obrade Tabele A.", "error");
         return;
       }
       const result = await processTableA(file, currentMonthCards, workersForImport);
@@ -360,15 +461,23 @@ export default function App() {
       if (result.success) {
         downloadBlob(result.blob, result.filename);
         setImportDialogOpen(false);
+        toast("Tabela obrađena i preuzeta.", "success");
       }
     },
-    [currentMonthCards, workersForImport]
+    [currentMonthCards, workersForImport, toast]
   );
 
-  const totalHoursForm = operations.reduce((acc, op) => acc + op.ukupnoVreme, 0);
-  const totalHoursAllCards = currentMonthCards.reduce(
-    (acc, card) => acc + card.operations.reduce((a, op) => a + op.ukupnoVreme, 0),
-    0
+  const totalsForm = computeTotals(operations);
+  const totalsAllCards = currentMonthCards.reduce(
+    (acc, card) => {
+      const t = computeTotals(card.operations);
+      return {
+        workDays: acc.workDays + t.workDays,
+        weekend: acc.weekend + t.weekend,
+        total: acc.total + t.total,
+      };
+    },
+    { workDays: 0, weekend: 0, total: 0 }
   );
 
   const toggleTheme = useCallback(() => {
@@ -401,13 +510,39 @@ export default function App() {
                 {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </Button>
               <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setInfoOpen(true)}
+                title="Kako radi aplikacija"
+              >
+                <Info className="h-4 w-4" />
+              </Button>
+              <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setSettingsOpen(true)}
               >
                 <Settings className="mr-2 h-4 w-4" />
-                Radnici
+                Podešavanja
               </Button>
+            </div>
+          </div>
+          <div className="rounded-lg border-2 border-[var(--color-border)] bg-[var(--color-muted)]/30 p-1">
+            <p className="mb-2 text-center text-xs font-medium text-[var(--color-muted-foreground)]">
+              Izaberite firmu
+            </p>
+            <div className="flex gap-2">
+              {companies.map((c) => (
+                <Button
+                  key={c.id}
+                  variant={selectedCompanyId === c.id ? "default" : "outline"}
+                  size="lg"
+                  className="flex-1 text-base font-semibold"
+                  onClick={() => setSelectedCompany(c.id)}
+                >
+                  {c.name}
+                </Button>
+              ))}
             </div>
           </div>
           <div className="flex gap-1 rounded-lg bg-[var(--color-muted)]/50 p-1">
@@ -442,18 +577,25 @@ export default function App() {
         {activeTab === "archive" ? (
           <ArchiveView
             cards={archiveCards}
+            companyName={selectedCompany?.name ?? ""}
             onEdit={(card) => { setActiveTab("current"); handleEdit(card); }}
             onDeleteCard={deleteCard}
             onUnarchive={markCardUnarchived}
           />
         ) : (
           <>
+        <div className="rounded-lg border-2 border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 px-4 py-2 text-center">
+          <p className="text-sm font-semibold text-[var(--color-foreground)]">
+            Trenutno radite za: <span className="text-[var(--color-primary)]">{selectedCompany?.name ?? "—"}</span>
+          </p>
+        </div>
         <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-muted)]/20 px-4 py-3 text-sm text-[var(--color-foreground)]">
           <p className="font-medium mb-1">Tok rada:</p>
           <ol className="list-decimal list-inside space-y-0.5 text-[var(--color-muted-foreground)]">
-            <li>Dodaj radnike (dugme <strong>Radnici</strong> gore desno).</li>
+            <li>Dodaj radnike (dugme <strong>Podešavanja</strong> gore desno).</li>
             <li>Ispod unesi prekovremeni rad — izaberi radnika, unesi operacije, <strong>Sačuvaj karticu</strong>.</li>
-            <li>Pregledaj sačuvane kartice; zatim <strong>Izvezi u Excel</strong> (Tabela B) ili <strong>Uvezi Tabelu A</strong> da obrađuješ vreme.</li>
+            <li>Pregledaj sačuvane kartice; zatim <strong>Izvezi u Excel</strong> ili <strong>uvezi tabelu sa vremenom</strong> da obrađuješ.</li>
+            <li className="text-xs mt-1">Prečice: <kbd className="rounded bg-[var(--color-muted)] px-1">Ctrl+S</kbd> čuvanje, <kbd className="rounded bg-[var(--color-muted)] px-1">Ctrl+E</kbd> export</li>
           </ol>
         </div>
 
@@ -461,7 +603,7 @@ export default function App() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/15 text-sm font-bold text-[var(--color-primary)]">1</span>
-              {editingCardId ? "Izmena kartice (dodaj operacije)" : "Unos prekovremenog rada (Tabela B)"}
+              {editingCardId ? "Izmena kartice (dodaj operacije)" : "Unos prekovremenog rada"}
             </CardTitle>
             <p className="text-sm text-[var(--color-muted-foreground)] mt-1">
               Tekući mesec: <strong>{currentMonth}</strong>
@@ -469,7 +611,7 @@ export default function App() {
             <div className="mt-4 space-y-2">
               <Label>Radnik</Label>
               <WorkerSelect
-                workers={workers}
+                workers={workersForCompany}
                 selectedId={selectedWorkerId}
                 onSelect={setSelectedWorkerId}
                 placeholder="Izaberi radnika..."
@@ -505,14 +647,22 @@ export default function App() {
                 </Button>
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] pt-4">
-              <span className="text-sm font-medium">Sati (ukupno):</span>
-              <span className="text-lg font-semibold text-[var(--color-primary)]">
-                {formatHours(totalHoursForm)}
+            <div className="flex flex-wrap items-center gap-4 border-t border-[var(--color-border)] pt-4">
+              <span className="text-sm">
+                <span className="text-[var(--color-muted-foreground)]">Radni dani:</span>{" "}
+                <span className="font-semibold text-[var(--color-primary)]">{formatHours(totalsForm.workDays)}</span>
+              </span>
+              <span className="text-sm">
+                <span className="text-[var(--color-muted-foreground)]">Vikend:</span>{" "}
+                <span className="font-semibold">{formatHours(totalsForm.weekend)}</span>
+              </span>
+              <span className="text-sm">
+                <span className="text-[var(--color-muted-foreground)]">Ukupno:</span>{" "}
+                <span className="font-semibold">{formatHours(totalsForm.total)}</span>
               </span>
             </div>
             <div className="flex flex-wrap gap-2 pt-2">
-              <Button type="button" onClick={handleSave}>
+              <Button type="button" onClick={handleSave} title="Sačuvaj karticu (Ctrl+S)">
                 <Save className="mr-2 h-4 w-4" />
                 Sačuvaj karticu
               </Button>
@@ -532,8 +682,8 @@ export default function App() {
           ) : (
             <ul className="grid gap-3 sm:grid-cols-2">
               {currentMonthCards.map((card) => {
-                const cardTotal = card.operations.reduce((a, op) => a + op.ukupnoVreme, 0);
-                const cardNet = Math.max(0, cardTotal - (card.posleSmeneHours ?? 0));
+                const t = computeTotals(card.operations);
+                const cardNet = Math.max(0, t.workDays - (card.posleSmeneHours ?? 0));
                 return (
                   <li key={card.id}>
                     <Card className="flex flex-col">
@@ -545,7 +695,7 @@ export default function App() {
                       </CardHeader>
                       <CardContent className="flex flex-1 flex-col gap-2 pt-0">
                         <p className="text-sm">
-                          Ukupno: {formatHours(cardTotal)}
+                          Radni dani: {formatHours(t.workDays)} · Vikend: {formatHours(t.weekend)} · Ukupno: {formatHours(t.total)}
                           {card.posleSmeneHours != null && (
                             <> · Neto: {formatHours(cardNet)}</>
                           )}
@@ -591,20 +741,20 @@ export default function App() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/15 text-sm font-bold text-[var(--color-primary)]">3</span>
-              Izvoz i obrada Tabele A
+              Izvoz i obrada tabele
             </CardTitle>
             <p className="text-sm text-[var(--color-muted-foreground)] mt-1">
-              Izvezi kartice u Excel (Tabela B) ili uvezi Tabelu A da upišeš novo vreme (Tabela A − Tabela B).
+              Izvezi kartice u Excel ili uvezi tabelu sa vremenom da obrađuješ.
             </p>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-3">
-            <Button variant="outline" size="sm" onClick={handleExport}>
+            <Button variant="outline" size="sm" onClick={handleExport} title="Izvezi Excel (Ctrl+E)">
               <Download className="mr-2 h-4 w-4" />
               Izvezi tekući mesec (Excel)
             </Button>
             <Button variant="outline" size="sm" onClick={openImportDialog}>
               <FileSpreadsheet className="mr-2 h-4 w-4" />
-              Uvezi Tabelu A
+              Uvezi tabelu sa vremenom
             </Button>
           </CardContent>
         </Card>
@@ -613,7 +763,7 @@ export default function App() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">
-                {importResult.success ? "Tabela A — obrađena" : "Greška pri obradi Tabele A"}
+                {importResult.success ? "Obrađeno" : "Greška pri obradi"}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -629,8 +779,8 @@ export default function App() {
                             <tr className="text-left text-[var(--color-muted-foreground)]">
                               <th className="pr-3 font-medium">Radnik</th>
                               <th className="pr-3 font-medium">Posle smene</th>
-                              <th className="pr-3 font-medium">Tabela B</th>
-                              <th className="font-medium">Novo vreme (A − B)</th>
+                              <th className="pr-3 font-medium">Uneto vreme</th>
+                              <th className="font-medium">Novo vreme</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -651,7 +801,7 @@ export default function App() {
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
                       <div>
-                        <p className="text-sm font-medium">Bez kartice u Tabeli B ({importResult.unmatchedWorkers.length}):</p>
+                        <p className="text-sm font-medium">Bez unete kartice ({importResult.unmatchedWorkers.length}):</p>
                         <p className="text-sm text-[var(--color-muted-foreground)]">
                           {importResult.unmatchedWorkers.length <= 8
                             ? importResult.unmatchedWorkers.join(", ")
@@ -661,7 +811,7 @@ export default function App() {
                     </div>
                   )}
                   <p className="text-sm text-[var(--color-primary)]">
-                    Izmenjena Tabela A je preuzeta automatski.
+                    Izmenjena tabela je preuzeta automatski.
                   </p>
                 </>
               ) : (
@@ -676,11 +826,19 @@ export default function App() {
 
 
         <div className="fixed bottom-0 left-0 right-0 border-t border-[var(--color-border)] bg-[var(--color-card)] px-4 py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4">
+            <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-6">
               <div>
-                <span className="text-sm text-[var(--color-muted-foreground)]">Ukupno sati:</span>
-                <span className="ml-2 font-semibold">{formatHours(totalHoursAllCards)}</span>
+                <span className="text-sm text-[var(--color-muted-foreground)]">Radni dani:</span>
+                <span className="ml-2 font-semibold">{formatHours(totalsAllCards.workDays)}</span>
+              </div>
+              <div>
+                <span className="text-sm text-[var(--color-muted-foreground)]">Vikend:</span>
+                <span className="ml-2 font-semibold">{formatHours(totalsAllCards.weekend)}</span>
+              </div>
+              <div>
+                <span className="text-sm text-[var(--color-muted-foreground)]">Ukupno:</span>
+                <span className="ml-2 font-semibold">{formatHours(totalsAllCards.total)}</span>
               </div>
               <div>
                 <span className="text-sm text-[var(--color-muted-foreground)]">Kartice (ovaj mesec):</span>
@@ -698,7 +856,7 @@ export default function App() {
           <Card className="w-full max-w-md">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <div>
-                <CardTitle>Uvezi Tabelu A</CardTitle>
+                <CardTitle>Uvezi tabelu sa vremenom</CardTitle>
                 <p className="text-sm text-[var(--color-muted-foreground)] mt-1">
                   Izaberite radnike za koje obrađujete podatke. U tabeli će se tražiti samo ovi radnici.
                 </p>
@@ -713,7 +871,7 @@ export default function App() {
                   Radnici za obradu
                 </span>
                 <WorkerMultiSelect
-                  workers={workers}
+                  workers={workersForCompany}
                   selectedNames={workersForImport}
                   onSelectionChange={setWorkersForImport}
                   placeholder="Kliknite i izaberite radnike (pretraga + ček)"
@@ -742,14 +900,69 @@ export default function App() {
         </div>
       )}
 
+      {infoOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <Card className="w-full max-w-lg max-h-[85vh] overflow-auto">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="flex items-center gap-2">
+                <Info className="h-5 w-5" />
+                Kako radi aplikacija
+              </CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => setInfoOpen(false)}>
+                Zatvori
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm text-[var(--color-foreground)]">
+              <p className="text-[var(--color-muted-foreground)]">
+                Aplikacija služi za evidenciju prekovremenog rada. Omogućava unos sati po radnicima, izvoz u Excel i obradu tabele sa vremenom.
+              </p>
+              <div>
+                <h4 className="font-semibold mb-2">Šta možete da radite</h4>
+                <ul className="list-disc list-inside space-y-1 text-[var(--color-muted-foreground)]">
+                  <li>Unos prekovremenog rada po radnicima (datum, početak, kraj)</li>
+                  <li>Razlika između radnih dana i vikenda</li>
+                  <li>Dve firme — MR Engines i TikiVent (odvojeni podaci)</li>
+                  <li>Izvoz u Excel sa nazivom firme</li>
+                  <li>Uvoz tabele sa vremenom — oduzima uneto vreme od „Posle smene”</li>
+                  <li>Backup i restore svih podataka</li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="font-semibold mb-2">Tok rada</h4>
+                <ol className="list-decimal list-inside space-y-2 text-[var(--color-muted-foreground)]">
+                  <li>Izaberite firmu (MR Engines ili TikiVent).</li>
+                  <li>U Podešavanjima dodajte radnike za tu firmu.</li>
+                  <li>Unesite operacije — datum, početak, kraj. Možete unositi i vikend.</li>
+                  <li>Sačuvajte karticu (Ctrl+S).</li>
+                  <li>Izvezite u Excel (Ctrl+E) ili uvezite tabelu sa vremenom da obrađujete.</li>
+                </ol>
+              </div>
+              <div>
+                <h4 className="font-semibold mb-2">Uvoz tabele</h4>
+                <p className="text-[var(--color-muted-foreground)]">
+                  Kada uvezete Excel sa kolonama Ime, Prezime i Posle smene, aplikacija za svakog pronađenog radnika oduzima njegovo uneto vreme (samo radni dani) od vrednosti „Posle smene” i preuzima izmenjenu tabelu.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {settingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <SettingsWorkers
-            workers={workers}
+            companies={companies}
+            selectedCompanyId={selectedCompanyId}
+            workers={workersForCompany}
             cardCountByWorkerId={cardCountByWorkerId}
+            onCompanyNameChange={(id, name) =>
+              setCompanies((prev) => prev.map((c) => (c.id === id ? { ...c, name } : c)))
+            }
             onAdd={addWorker}
             onEdit={editWorker}
             onDelete={deleteWorker}
+            onExportBackup={handleExportBackup}
+            onImportBackup={handleImportBackup}
             onClose={() => setSettingsOpen(false)}
           />
         </div>

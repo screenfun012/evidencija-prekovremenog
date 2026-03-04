@@ -1,10 +1,11 @@
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { format, parseISO } from "date-fns";
+import { computeTotals } from "@/lib/dateUtils";
 import type { WorkerCard } from "@/types";
 
 const HEADER_ROW = 1;
-const DATA_START_ROW = 2;
+const DATA_START_ROW = 3;
 const SATI_LABEL_ROW = 27;
 const COL_COUNT = 6;
 
@@ -72,9 +73,16 @@ function applyBordersToRow(row: ExcelJS.Row, colCount: number): void {
 async function buildSheet(
   wb: ExcelJS.Workbook,
   card: WorkerCard,
-  sheetName: string
+  sheetName: string,
+  companyName: string
 ): Promise<void> {
   const ws = wb.addWorksheet(sheetName);
+
+  // Red 0: Naziv firme
+  const companyRow = ws.getRow(1);
+  companyRow.getCell(1).value = companyName;
+  companyRow.getCell(1).font = { bold: true, size: 12 };
+  companyRow.height = 22;
 
   // Širine kolona: A široka za datum/napomenu, ostale prilagođene
   ws.getColumn(1).width = 35; // A: RADNA OPERACIJA / DATUM / napomena
@@ -86,9 +94,9 @@ async function buildSheet(
 
   const sorted = [...card.operations].sort((a, b) => a.datum.localeCompare(b.datum));
 
-  // --- Row 1: Headers (plava pozadina kao na slici) ---
+  // --- Row 2: Headers (plava pozadina kao na slici) ---
   const headers = ["RADNA OPERACIJA", "R.NALOG", "POČETAK ", "KRAJ", "VREME PO OPERACIJI", "UKUPNO VREME"];
-  const r2 = ws.getRow(HEADER_ROW);
+  const r2 = ws.getRow(HEADER_ROW + 1);
   headers.forEach((h, i) => {
     r2.getCell(i + 1).value = h;
     r2.getCell(i + 1).font = { bold: true };
@@ -97,7 +105,7 @@ async function buildSheet(
   applyHighlight(r2, COL_COUNT);
   applyBordersToRow(r2, COL_COUNT);
 
-  // --- Data rows: svaki datum dobija svoj plavi red, pa ispod njega operacije ---
+  // --- Data rows: svaki datum dobija svoj plavi red, pa ispod njega operacije (pomeramo za +1 zbog firme) ---
   type DataItem =
     | { type: "datum"; datum: string }
     | { type: "op"; op: (typeof sorted)[0] };
@@ -137,39 +145,39 @@ async function buildSheet(
     applyBordersToRow(ws.getRow(r), COL_COUNT);
   }
 
-  // --- SATI row ---
-  const satiRow = ws.getRow(satiLabelRow);
-  satiRow.getCell(1).value = "SATI";
-  satiRow.getCell(1).font = { bold: true };
-  satiRow.getCell(2).value = "CENA";
-  satiRow.getCell(2).font = { bold: true };
-  satiRow.getCell(4).value = "IZNOS";
-  satiRow.getCell(4).font = { bold: true };
-  applyHighlight(satiRow, COL_COUNT);
-  applyBordersToRow(satiRow, COL_COUNT);
-  // Merges: B:C and D:E for sati label row
-  ws.mergeCells(satiLabelRow, 2, satiLabelRow, 3);
-  ws.mergeCells(satiLabelRow, 4, satiLabelRow, 5);
+  // --- UKUPNO redovi ---
+  const t = computeTotals(card.operations);
+  const round2 = (x: number) => Math.round(x * 100) / 100;
 
-  // --- Values row ---
-  const valRow = satiLabelRow + 1;
-  const vr = ws.getRow(valRow);
-  const ukupnoSati = Math.round(card.operations.reduce((acc, op) => acc + op.ukupnoVreme, 0) * 100) / 100;
-  vr.getCell(1).value = ukupnoSati;
-  vr.getCell(1).font = { bold: true };
-  applyHighlight(vr, COL_COUNT);
-  applyBordersToRow(vr, COL_COUNT);
-  ws.mergeCells(valRow, 2, valRow, 3);
-  ws.mergeCells(valRow, 4, valRow, 5);
+  const rows = [
+    { label: "UKUPNO RADNI DANI", value: round2(t.workDays) },
+    { label: "UKUPNO VIKENDI", value: round2(t.weekend) },
+    { label: "UKUPNO RADNI DANI + VIKEND", value: round2(t.total) },
+  ];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = ws.getRow(satiLabelRow + i);
+    r.getCell(1).value = rows[i].label;
+    r.getCell(1).font = { bold: true };
+    r.getCell(2).value = rows[i].value;
+    r.getCell(2).font = { bold: true };
+    applyHighlight(r, COL_COUNT);
+    applyBordersToRow(r, COL_COUNT);
+    ws.mergeCells(satiLabelRow + i, 2, satiLabelRow + i, 3);
+    ws.mergeCells(satiLabelRow + i, 4, satiLabelRow + i, 5);
+  }
 }
 
-export async function exportCardsToExcel(cards: WorkerCard[]): Promise<ExcelJS.Workbook> {
+export async function exportCardsToExcel(
+  cards: WorkerCard[],
+  companyName: string
+): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
   const usedNames = new Set<string>();
 
   for (const card of cards) {
     const sheetName = safeSheetName(card.workerName, usedNames);
-    await buildSheet(wb, card, sheetName);
+    await buildSheet(wb, card, sheetName, companyName);
   }
 
   return wb;

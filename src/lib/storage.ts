@@ -14,15 +14,23 @@ export interface StoredWorkerCard {
   id: string;
   workerId: string;
   workerName: string;
+  companyId?: string;
   month: string;
   operations: StoredOperation[];
   posleSmeneHours: number | null;
   archived?: boolean;
 }
 
+export interface StoredCompany {
+  id: string;
+  name: string;
+}
+
 export interface StoredState {
-  workers: { id: string; name: string }[];
+  companies?: StoredCompany[];
+  workers: { id: string; name: string; companyId?: string }[];
   cards: StoredWorkerCard[];
+  selectedCompanyId?: string | null;
   selectedWorkerId: string | null;
   operations: StoredOperation[];
   posleSmeneHours: number | null;
@@ -30,9 +38,16 @@ export interface StoredState {
   theme: string;
 }
 
+const DEFAULT_COMPANIES: StoredCompany[] = [
+  { id: "mr", name: "MR Engines" },
+  { id: "tiki", name: "TikiVent" },
+];
+
 const defaultState: StoredState = {
+  companies: DEFAULT_COMPANIES,
   workers: [],
   cards: [],
+  selectedCompanyId: "mr",
   selectedWorkerId: null,
   operations: [],
   posleSmeneHours: null,
@@ -49,19 +64,38 @@ declare global {
   }
 }
 
+export function migrateState(parsed: StoredState): StoredState {
+  const state = { ...defaultState, ...parsed };
+  if (!state.companies?.length) state.companies = DEFAULT_COMPANIES;
+  if (!state.selectedCompanyId && state.companies.length > 0) {
+    state.selectedCompanyId = state.companies[0].id;
+  }
+  state.workers = (state.workers ?? []).map((w) => ({
+    ...w,
+    companyId: w.companyId ?? "mr",
+  }));
+  const workerCompanyMap: Record<string, string> = {};
+  for (const w of state.workers) workerCompanyMap[w.id] = w.companyId ?? "mr";
+  state.cards = (state.cards ?? []).map((c) => ({
+    ...c,
+    companyId: c.companyId ?? workerCompanyMap[c.workerId] ?? "mr",
+  }));
+  return state;
+}
+
 export async function loadState(): Promise<StoredState> {
   try {
     if (typeof window !== "undefined" && window.storageApi) {
       const raw = await window.storageApi.get(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as StoredState;
-        return { ...defaultState, ...parsed };
+        return migrateState(parsed);
       }
     } else if (typeof localStorage !== "undefined") {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as StoredState;
-        return { ...defaultState, ...parsed };
+        return migrateState(parsed);
       }
     }
   } catch (_) {

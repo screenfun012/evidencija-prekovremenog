@@ -1,6 +1,12 @@
+export interface Company {
+  id: string;
+  name: string;
+}
+
 export interface Worker {
   id: string;
   name: string;
+  companyId: string;
 }
 
 export interface Operation {
@@ -18,6 +24,7 @@ export interface WorkerCard {
   id: string;
   workerId: string;
   workerName: string;
+  companyId: string;
   /** Mesec u formatu YYYY-MM (za prikaz i izvoz). */
   month: string;
   operations: Operation[];
@@ -27,9 +34,12 @@ export interface WorkerCard {
 }
 
 export interface AppState {
+  companies: Company[];
   workers: Worker[];
   /** Sačuvane kartice (po radnicima / mesecima). */
   cards: WorkerCard[];
+  /** Izabrana firma (MR Engines / TikiVent). */
+  selectedCompanyId: string | null;
   /** Trenutni formular: izabrani radnik i operacije (pre Sačuvaj ili u režimu Edit). */
   selectedWorkerId: string | null;
   operations: Operation[];

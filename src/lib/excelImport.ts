@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
+import { computeTotals } from "@/lib/dateUtils";
 import type { WorkerCard } from "@/types";
 
 /** HH:MM:SS, decimalni broj ili Excel serial (0–1 = dan) -> decimalni sati */
@@ -188,10 +189,10 @@ export async function processTableA(
         const card = cardsToUse.find((k) => namesMatch(k.workerName, ime, prezime));
 
         if (card) {
-          const cardTotalHours = card.operations.reduce((acc, op) => acc + op.ukupnoVreme, 0);
+          const { workDays } = computeTotals(card.operations);
           const rawCell4 = row.getCell(4).value;
           const currentHours = parseTimeToDecimalHours(rawCell4);
-          const newHours = currentHours - cardTotalHours;
+          const newHours = currentHours - workDays;
           const newValue = decimalHoursToTimeStr(newHours);
           const cell = ws.getCell(r, 4);
           cell.value = newValue;
@@ -199,7 +200,7 @@ export async function processTableA(
           matched.push({
             name: fullName,
             originalPosleSmene: col4 || "0",
-            tabelaBTotal: decimalHoursToTimeStr(cardTotalHours),
+            tabelaBTotal: decimalHoursToTimeStr(workDays),
             newPosleSmene: newValue,
           });
         } else {
@@ -240,16 +241,16 @@ export async function processTableA(
           const card = cardsToUse.find((c) => namesMatch(c.workerName, ime, prezime));
 
           if (card) {
-            const cardTotalHours = card.operations.reduce((acc, op) => acc + op.ukupnoVreme, 0);
+            const { workDays } = computeTotals(card.operations);
             const currentValue = String(ws.getRow(r)?.getCell(posleSmeneCol)?.value ?? "");
             const currentHours = parseTimeToDecimalHours(currentValue);
-            const newHours = currentHours - cardTotalHours;
+            const newHours = currentHours - workDays;
             const newValue = decimalHoursToTimeStr(newHours);
             ws.getCell(r, posleSmeneCol).value = newValue;
             matched.push({
               name: fullName,
               originalPosleSmene: currentValue,
-              tabelaBTotal: decimalHoursToTimeStr(cardTotalHours),
+              tabelaBTotal: decimalHoursToTimeStr(workDays),
               newPosleSmene: newValue,
             });
           } else {
@@ -282,16 +283,16 @@ export async function processTableA(
             const card = cardsToUse.find((k) => namesMatch(k.workerName, ime, prezime));
 
             if (card) {
-              const cardTotalHours = card.operations.reduce((acc, op) => acc + op.ukupnoVreme, 0);
+              const { workDays } = computeTotals(card.operations);
               const currentValue = String(ws.getRow(posleSmeneRow)?.getCell(dataCol)?.value ?? "");
               const currentHours = parseTimeToDecimalHours(currentValue);
-              const newHours = currentHours - cardTotalHours;
+              const newHours = currentHours - workDays;
               const newValue = decimalHoursToTimeStr(newHours);
               ws.getCell(posleSmeneRow, dataCol).value = newValue;
               matched.push({
                 name: fullName,
                 originalPosleSmene: currentValue,
-                tabelaBTotal: decimalHoursToTimeStr(cardTotalHours),
+                tabelaBTotal: decimalHoursToTimeStr(workDays),
                 newPosleSmene: newValue,
               });
             } else {
@@ -306,7 +307,7 @@ export async function processTableA(
         return {
           success: false,
           message:
-            'U fajlu nije pronađena Tabela A sa poljima "Ime", "Prezime" i "Posle smene". Proverite da li je tabela horizontalna (zaglavlje u redu), vertikalna (oznake u stupcu) ili format čekiranja.',
+            'U fajlu nije pronađena tabela sa poljima "Ime", "Prezime" i "Posle smene". Proverite da li je tabela horizontalna (zaglavlje u redu), vertikalna (oznake u stupcu) ili format čekiranja.',
         };
       }
     }

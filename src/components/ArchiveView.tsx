@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatHours } from "@/lib/utils";
+import { computeTotals } from "@/lib/dateUtils";
 import { exportCardsToExcel, downloadExcel } from "@/lib/excelExport";
 import type { WorkerCard } from "@/types";
 
@@ -20,6 +21,7 @@ function monthLabel(month: string): string {
 
 interface ArchiveViewProps {
   cards: WorkerCard[];
+  companyName: string;
   onEdit: (card: WorkerCard) => void;
   onDeleteCard: (cardId: string) => void;
   onUnarchive: (cardId: string) => void;
@@ -32,7 +34,7 @@ function cardHasDate(card: WorkerCard, dateQ: string): boolean {
   return card.operations.some((op) => op.datum && op.datum.includes(q));
 }
 
-export function ArchiveView({ cards, onEdit, onDeleteCard, onUnarchive }: ArchiveViewProps) {
+export function ArchiveView({ cards, companyName, onEdit, onDeleteCard, onUnarchive }: ArchiveViewProps) {
   const [searchName, setSearchName] = useState("");
   const [searchMonth, setSearchMonth] = useState("");
   const [searchDate, setSearchDate] = useState("");
@@ -70,8 +72,9 @@ export function ArchiveView({ cards, onEdit, onDeleteCard, onUnarchive }: Archiv
   }, [grouped, searchName, searchMonth, searchDate]);
 
   const handleExportMonth = async (month: string, monthCards: WorkerCard[]) => {
-    const wb = await exportCardsToExcel(monthCards);
-    await downloadExcel(wb, `Tabela_B_${month.replace("-", "_")}.xlsx`);
+    const companySlug = companyName.replace(/\s+/g, "_");
+    const wb = await exportCardsToExcel(monthCards, companyName);
+    await downloadExcel(wb, `Tabela_B_${companySlug}_${month.replace("-", "_")}.xlsx`);
   };
 
   if (cards.length === 0) {
@@ -164,8 +167,8 @@ export function ArchiveView({ cards, onEdit, onDeleteCard, onUnarchive }: Archiv
                 <CardContent className="pt-0">
                   <ul className="grid gap-3 sm:grid-cols-2">
                     {monthCards.map((card) => {
-                      const cardTotal = card.operations.reduce((a, op) => a + op.ukupnoVreme, 0);
-                      const cardNet = Math.max(0, cardTotal - (card.posleSmeneHours ?? 0));
+                      const t = computeTotals(card.operations);
+                      const cardNet = Math.max(0, t.workDays - (card.posleSmeneHours ?? 0));
                       return (
                         <li key={card.id}>
                           <Card className="flex flex-col border-[var(--color-border)]">
@@ -177,7 +180,7 @@ export function ArchiveView({ cards, onEdit, onDeleteCard, onUnarchive }: Archiv
                             </CardHeader>
                             <CardContent className="flex flex-1 flex-col gap-2 pt-0">
                               <p className="text-sm">
-                                Ukupno: {formatHours(cardTotal)}
+                                Radni dani: {formatHours(t.workDays)} · Vikend: {formatHours(t.weekend)} · Ukupno: {formatHours(t.total)}
                                 {card.posleSmeneHours != null && (
                                   <> · Neto: {formatHours(cardNet)}</>
                                 )}
