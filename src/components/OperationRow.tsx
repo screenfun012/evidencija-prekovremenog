@@ -1,5 +1,5 @@
 import { useCallback, useRef } from "react";
-import { Trash2, Clock } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -114,39 +114,25 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
       </div>
       <div className="space-y-1.5">
         <Label>Početak</Label>
-        <div className="relative flex">
-          <Input
-            ref={pocetakRef}
-            type="time"
-            value={operation.pocetak}
-            onChange={handleTimeChange("pocetak")}
-            onBlur={handleTimeBlur}
-            onClick={handleTimeClick("pocetak")}
-            className="pr-9"
-          />
-          <Clock
-            className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 pointer-events-none text-[var(--color-muted-foreground)]"
-            aria-hidden
-          />
-        </div>
+        <Input
+          ref={pocetakRef}
+          type="time"
+          value={operation.pocetak}
+          onChange={handleTimeChange("pocetak")}
+          onBlur={handleTimeBlur}
+          onClick={handleTimeClick("pocetak")}
+        />
       </div>
       <div className="space-y-1.5">
         <Label>Kraj</Label>
-        <div className="relative flex">
-          <Input
-            ref={krajRef}
-            type="time"
-            value={operation.kraj}
-            onChange={handleTimeChange("kraj")}
-            onBlur={handleTimeBlur}
-            onClick={handleTimeClick("kraj")}
-            className="pr-9"
-          />
-          <Clock
-            className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 pointer-events-none text-[var(--color-muted-foreground)]"
-            aria-hidden
-          />
-        </div>
+        <Input
+          ref={krajRef}
+          type="time"
+          value={operation.kraj}
+          onChange={handleTimeChange("kraj")}
+          onBlur={handleTimeBlur}
+          onClick={handleTimeClick("kraj")}
+        />
       </div>
       <div className="space-y-1.5">
         <Label>Ukupno vreme</Label>
