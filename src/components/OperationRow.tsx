@@ -1,5 +1,5 @@
 import { useCallback, useRef } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -65,6 +65,11 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
     [operation, onChange, recalcTime]
   );
 
+  const handleTimeClick = useCallback((field: "pocetak" | "kraj") => () => {
+    const ref = field === "pocetak" ? pocetakRef : krajRef;
+    ref.current?.showPicker?.();
+  }, []);
+
   const handleTimeBlur = useCallback(() => {
     let pocetak = pocetakRef.current?.value ?? operation.pocetak;
     let kraj = krajRef.current?.value ?? operation.kraj;
@@ -109,23 +114,39 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
       </div>
       <div className="space-y-1.5">
         <Label>Početak</Label>
-        <Input
-          ref={pocetakRef}
-          type="time"
-          value={operation.pocetak}
-          onChange={handleTimeChange("pocetak")}
-          onBlur={handleTimeBlur}
-        />
+        <div className="relative flex">
+          <Input
+            ref={pocetakRef}
+            type="time"
+            value={operation.pocetak}
+            onChange={handleTimeChange("pocetak")}
+            onBlur={handleTimeBlur}
+            onClick={handleTimeClick("pocetak")}
+            className="pr-9"
+          />
+          <Clock
+            className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 pointer-events-none text-[var(--color-muted-foreground)]"
+            aria-hidden
+          />
+        </div>
       </div>
       <div className="space-y-1.5">
         <Label>Kraj</Label>
-        <Input
-          ref={krajRef}
-          type="time"
-          value={operation.kraj}
-          onChange={handleTimeChange("kraj")}
-          onBlur={handleTimeBlur}
-        />
+        <div className="relative flex">
+          <Input
+            ref={krajRef}
+            type="time"
+            value={operation.kraj}
+            onChange={handleTimeChange("kraj")}
+            onBlur={handleTimeBlur}
+            onClick={handleTimeClick("kraj")}
+            className="pr-9"
+          />
+          <Clock
+            className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 pointer-events-none text-[var(--color-muted-foreground)]"
+            aria-hidden
+          />
+        </div>
       </div>
       <div className="space-y-1.5">
         <Label>Ukupno vreme</Label>
