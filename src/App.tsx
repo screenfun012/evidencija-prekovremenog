@@ -465,7 +465,6 @@ export default function App() {
 
   const handleExportSingleCard = useCallback(
     async (card: WorkerCard) => {
-      const companySlug = (selectedCompany?.name ?? "firma").replace(/\s+/g, "_");
       const wb = await exportCardsToExcel([card], selectedCompany?.name ?? "");
       await downloadExcel(wb, `Kartica_${card.workerName.replace(/\s+/g, "_")}_${card.month.replace("-", "_")}.xlsx`);
       toast("Kartica izvezena.", "success");

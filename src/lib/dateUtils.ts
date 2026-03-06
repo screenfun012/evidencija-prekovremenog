@@ -69,16 +69,16 @@ export interface OperationWithTime {
  * računa se jedan blok (scenarij "od na prvom, do na poslednjem").
  * Inače svaki red koristi svoje od–do.
  */
-export function effectiveOperationsWithGroupTime(
-  operations: OperationWithTime[]
-): OperationWithTime[] {
-  const byDate = new Map<string, OperationWithTime[]>();
+export function effectiveOperationsWithGroupTime<T extends OperationWithTime>(
+  operations: T[]
+): T[] {
+  const byDate = new Map<string, T[]>();
   for (const op of operations) {
     const d = op.datum || "\uFFFF";
     if (!byDate.has(d)) byDate.set(d, []);
     byDate.get(d)!.push(op);
   }
-  const result: OperationWithTime[] = [];
+  const result: T[] = [];
   for (const [, ops] of byDate) {
     const first = ops[0];
     const last = ops[ops.length - 1];
@@ -93,10 +93,10 @@ export function effectiveOperationsWithGroupTime(
         result.push({
           ...op,
           ukupnoVreme: i === 0 ? groupTotal : 0,
-        })
+        } as T)
       );
     } else {
-      ops.forEach((op) => result.push({ ...op }));
+      ops.forEach((op) => result.push({ ...op } as T));
     }
   }
   return result;
