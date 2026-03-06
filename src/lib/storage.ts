@@ -8,6 +8,7 @@ export interface StoredOperation {
   pocetak: string;
   kraj: string;
   ukupnoVreme: number;
+  isStandalone?: boolean;
 }
 
 export interface StoredWorkerCard {

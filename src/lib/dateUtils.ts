@@ -47,3 +47,57 @@ export function computeTotals(
   }
   return { workDays, weekend, total: workDays + weekend };
 }
+
+function isValidTime(s: string): boolean {
+  if (!s?.trim()) return false;
+  const parts = s.trim().split(":");
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1] ?? "0", 10);
+  return !Number.isNaN(h) && h >= 0 && h <= 23 && !Number.isNaN(m) && m >= 0 && m <= 59;
+}
+
+export interface OperationWithTime {
+  id: string;
+  datum: string;
+  pocetak: string;
+  kraj: string;
+  ukupnoVreme: number;
+}
+
+/**
+ * Za grupe po datumu: ako prvi red ima početak a poslednji kraj,
+ * računa se jedan blok (scenarij "od na prvom, do na poslednjem").
+ * Inače svaki red koristi svoje od–do.
+ */
+export function effectiveOperationsWithGroupTime(
+  operations: OperationWithTime[]
+): OperationWithTime[] {
+  const byDate = new Map<string, OperationWithTime[]>();
+  for (const op of operations) {
+    const d = op.datum || "\uFFFF";
+    if (!byDate.has(d)) byDate.set(d, []);
+    byDate.get(d)!.push(op);
+  }
+  const result: OperationWithTime[] = [];
+  for (const [, ops] of byDate) {
+    const first = ops[0];
+    const last = ops[ops.length - 1];
+    const useGroupBlock =
+      first.pocetak?.trim() &&
+      last.kraj?.trim() &&
+      isValidTime(first.pocetak) &&
+      isValidTime(last.kraj);
+    if (useGroupBlock) {
+      const groupTotal = timeDiffHours(first.pocetak, last.kraj);
+      ops.forEach((op, i) =>
+        result.push({
+          ...op,
+          ukupnoVreme: i === 0 ? groupTotal : 0,
+        })
+      );
+    } else {
+      ops.forEach((op) => result.push({ ...op }));
+    }
+  }
+  return result;
+}

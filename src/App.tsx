@@ -1,20 +1,33 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Settings, Upload, FileSpreadsheet, Save, Pencil, Moon, Sun, Download, CheckCircle, AlertTriangle, Calendar, Archive, Trash2, Info } from "lucide-react";
+import { Settings, Upload, FileSpreadsheet, Save, Pencil, Moon, Sun, Download, CheckCircle, AlertTriangle, Calendar, Archive, Trash2, Info, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WorkerSelect } from "@/components/WorkerSelect";
 import { OperationRow } from "@/components/OperationRow";
 import { SettingsWorkers } from "@/components/SettingsWorkers";
 import { ArchiveView } from "@/components/ArchiveView";
 import { WorkerMultiSelect } from "@/components/WorkerMultiSelect";
+import { format, parseISO } from "date-fns";
 import { formatHours } from "@/lib/utils";
-import { timeDiffHours, computeTotals } from "@/lib/dateUtils";
+import { timeDiffHours, computeTotals, effectiveOperationsWithGroupTime } from "@/lib/dateUtils";
 import { loadState, saveState, migrateState, type StoredState } from "@/lib/storage";
 import { useToast } from "@/components/Toast";
 import { processTableA, downloadBlob, type ProcessOutcome } from "@/lib/excelImport";
 import { exportCardsToExcel, downloadExcel } from "@/lib/excelExport";
 import type { Worker, Operation, WorkerCard, Company } from "@/types";
+
+const isNewGroupPlaceholder = (d: string) => d.startsWith("__new_");
+
+function formatDateDisplay(dateStr: string): string {
+  if (!dateStr || isNewGroupPlaceholder(dateStr)) return "—";
+  try {
+    return format(parseISO(dateStr), "dd.MM.yyyy.");
+  } catch {
+    return dateStr;
+  }
+}
 
 function getCurrentMonth(): string {
   const now = new Date();
@@ -26,7 +39,7 @@ function generateId() {
 }
 
 function getMonthFromOperations(operations: Operation[]): string {
-  const first = operations.find((op) => op.datum);
+  const first = operations.find((op) => op.datum && !isNewGroupPlaceholder(op.datum));
   if (first?.datum) return first.datum.slice(0, 7);
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -60,6 +73,7 @@ function toStoredState(
         pocetak: op.pocetak,
         kraj: op.kraj,
         ukupnoVreme: op.ukupnoVreme,
+        ...(op.isStandalone != null && { isStandalone: op.isStandalone }),
       })),
       posleSmeneHours: c.posleSmeneHours,
       archived: c.archived ?? false,
@@ -73,6 +87,7 @@ function toStoredState(
       radniNalog: op.radniNalog,
       pocetak: op.pocetak,
       kraj: op.kraj,
+      ...(op.isStandalone != null && { isStandalone: op.isStandalone }),
       ukupnoVreme: op.ukupnoVreme,
     })),
     posleSmeneHours,
@@ -117,6 +132,7 @@ function fromStoredState(s: StoredState): {
         pocetak: op.pocetak,
         kraj: op.kraj,
         ukupnoVreme: op.ukupnoVreme,
+        ...(op.isStandalone != null && { isStandalone: op.isStandalone }),
       })),
       posleSmeneHours: c.posleSmeneHours,
       archived: c.archived ?? false,
@@ -131,6 +147,7 @@ function fromStoredState(s: StoredState): {
       pocetak: op.pocetak,
       kraj: op.kraj,
       ukupnoVreme: op.ukupnoVreme,
+      ...(op.isStandalone != null && { isStandalone: op.isStandalone }),
     })),
     posleSmeneHours: s.posleSmeneHours ?? null,
     editingCardId: s.editingCardId ?? null,
@@ -177,6 +194,45 @@ export default function App() {
     }
     return map;
   }, [cardsForCompany]);
+  const suggestedNapomene = useMemo(
+    () => [...new Set(operations.map((o) => o.napomena.trim()).filter(Boolean))],
+    [operations]
+  );
+  const suggestedRadniNalozi = useMemo(
+    () => [...new Set(operations.map((o) => o.radniNalog.trim()).filter(Boolean))],
+    [operations]
+  );
+  const operationGroups = useMemo(() => {
+    const byKey = new Map<string, Operation[]>();
+    for (const op of operations) {
+      const key = op.isStandalone ? `__standalone_${op.id}` : (op.datum || "\uFFFF");
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key)!.push(op);
+    }
+    return Array.from(byKey.entries())
+      .sort(([a], [b]) => {
+        if (a.startsWith("__standalone_")) return 1;
+        if (b.startsWith("__standalone_")) return -1;
+        if (a === "\uFFFF") return 1;
+        if (b === "\uFFFF") return -1;
+        return a.localeCompare(b);
+      })
+      .map(([key, ops]) => ({
+        date: key.startsWith("__standalone_") ? key : key === "\uFFFF" ? "" : key,
+        operations: ops,
+        isStandalone: ops.length === 1 && ops[0].isStandalone,
+      }));
+  }, [operations]);
+
+  const effectiveOperations = useMemo(
+    () => effectiveOperationsWithGroupTime(operations),
+    [operations]
+  );
+  const effectiveUkupnoByOpId = useMemo(() => {
+    const m = new Map<string, number>();
+    effectiveOperations.forEach((op) => m.set(op.id, op.ukupnoVreme));
+    return m;
+  }, [effectiveOperations]);
   const selectedCompany = companies.find((c) => c.id === selectedCompanyId);
   const { toast } = useToast();
 
@@ -229,7 +285,27 @@ export default function App() {
     setPosleSmeneHours(null);
   }, []);
 
-  const addOperation = useCallback(() => {
+  /** Nova grupa za jedan dan: zeleni blok, datum + Od/Do u headeru, redovi samo Napomena + Radni nalog */
+  const addDayGroup = useCallback(() => {
+    setOperations((prev) => {
+      const id = generateId();
+      return [
+        ...prev,
+        {
+          id,
+          datum: `__new_${id}`,
+          napomena: "",
+          radniNalog: "",
+          pocetak: "",
+          kraj: "",
+          ukupnoVreme: 0,
+        },
+      ];
+    });
+  }, []);
+
+  /** Jedan red sa punim poljima: Datum, Napomena, Radni nalog, Početak, Kraj, Ukupno vreme */
+  const addStandaloneOperation = useCallback(() => {
     setOperations((prev) => [
       ...prev,
       {
@@ -240,9 +316,47 @@ export default function App() {
         pocetak: "",
         kraj: "",
         ukupnoVreme: 0,
+        isStandalone: true,
       },
     ]);
   }, []);
+
+  const addOperationWithDate = useCallback((date: string) => {
+    if (date.startsWith("__standalone_")) return;
+    setOperations((prev) => [
+      ...prev,
+      {
+        id: generateId(),
+        datum: date,
+        napomena: "",
+        radniNalog: "",
+        pocetak: "",
+        kraj: "",
+        ukupnoVreme: 0,
+      },
+    ]);
+  }, []);
+
+  const updateGroupDate = useCallback((opIds: string[], newDate: string) => {
+    setOperations((prev) =>
+      prev.map((op) => (opIds.includes(op.id) ? { ...op, datum: newDate } : op))
+    );
+  }, []);
+
+  const updateGroupTime = useCallback(
+    (opIds: string[], field: "pocetak" | "kraj", value: string) => {
+      if (opIds.length === 0) return;
+      const firstId = opIds[0];
+      const lastId = opIds[opIds.length - 1];
+      const targetId = field === "pocetak" ? firstId : lastId;
+      setOperations((prev) =>
+        prev.map((op) =>
+          op.id === targetId ? { ...op, [field]: value } : op
+        )
+      );
+    },
+    []
+  );
 
   const updateOperation = useCallback((id: string, upd: Partial<Operation>) => {
     setOperations((prev) =>
@@ -260,21 +374,34 @@ export default function App() {
       toast("Izaberite radnika pre čuvanja.", "error");
       return;
     }
+    const hasUnsetDate = operations.some((op) => isNewGroupPlaceholder(op.datum));
+    if (hasUnsetDate) {
+      toast("Postavite datum za sve operacije (izaberite datum u zelenom zaglavlju grupe).", "error");
+      return;
+    }
+    const standaloneWithoutDate = operations.some(
+      (op) => op.isStandalone && !op.datum?.trim()
+    );
+    if (standaloneWithoutDate) {
+      toast("Postavite datum za pojedinačnu operaciju (polje Datum u tom redu).", "error");
+      return;
+    }
     const opsWithRecalc = operations.map((op) => {
       if (op.pocetak && op.kraj && op.ukupnoVreme === 0) {
         return { ...op, ukupnoVreme: timeDiffHours(op.pocetak, op.kraj) };
       }
       return op;
     });
-    const totalHours = opsWithRecalc.reduce((acc, op) => acc + op.ukupnoVreme, 0);
-    if (opsWithRecalc.length === 0 || totalHours === 0) {
+    const effectiveForSave = effectiveOperationsWithGroupTime(opsWithRecalc);
+    const totalHours = effectiveForSave.reduce((acc, op) => acc + op.ukupnoVreme, 0);
+    if (effectiveForSave.length === 0 || totalHours === 0) {
       toast("Dodajte bar jednu operaciju sa popunjenim vremenom (početak i kraj) pre čuvanja.", "error");
       return;
     }
     const month = editingCardId
-      ? getMonthFromOperations(opsWithRecalc)
+      ? getMonthFromOperations(effectiveForSave)
       : currentMonth;
-    const opsToSave = opsWithRecalc.map((op) => ({ ...op, ukupnoVreme: op.ukupnoVreme }));
+    const opsToSave = effectiveForSave.map((op) => ({ ...op, ukupnoVreme: op.ukupnoVreme }));
     if (editingCardId) {
       setCards((prev) =>
         prev.map((c) =>
@@ -335,6 +462,16 @@ export default function App() {
     await downloadExcel(wb, `Tabela_B_${companySlug}_${currentMonth.replace("-", "_")}.xlsx`);
     toast("Excel izvezen.", "success");
   }, [currentMonthCards, currentMonth, selectedCompany?.name, toast]);
+
+  const handleExportSingleCard = useCallback(
+    async (card: WorkerCard) => {
+      const companySlug = (selectedCompany?.name ?? "firma").replace(/\s+/g, "_");
+      const wb = await exportCardsToExcel([card], selectedCompany?.name ?? "");
+      await downloadExcel(wb, `Kartica_${card.workerName.replace(/\s+/g, "_")}_${card.month.replace("-", "_")}.xlsx`);
+      toast("Kartica izvezena.", "success");
+    },
+    [selectedCompany?.name, toast]
+  );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -467,7 +604,14 @@ export default function App() {
     [currentMonthCards, workersForImport, toast]
   );
 
-  const totalsForm = computeTotals(operations);
+  const totalsForm = computeTotals(
+    effectiveOperations.filter((op) => {
+      if (isNewGroupPlaceholder(op.datum)) return false;
+      const orig = operations.find((o) => o.id === op.id);
+      if (orig?.isStandalone && !op.datum?.trim()) return false;
+      return true;
+    })
+  );
   const totalsAllCards = currentMonthCards.reduce(
     (acc, card) => {
       const t = computeTotals(card.operations);
@@ -621,25 +765,139 @@ export default function App() {
           <CardContent className="space-y-4">
             {operations.length === 0 ? (
               <p className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-muted)]/30 py-8 text-center text-sm text-[var(--color-muted-foreground)]">
-                Nema unetih operacija. Kliknite „Dodaj operaciju” ispod.
+                Nema unetih operacija. Ispod izaberite kako da dodate.
               </p>
             ) : (
-              <ul className="space-y-3">
-                {operations.map((op) => (
-                  <li key={op.id}>
-                    <OperationRow
-                      operation={op}
-                      onChange={(updated) => updateOperation(op.id, updated)}
-                      onRemove={() => removeOperation(op.id)}
-                    />
+              <ul className="space-y-4">
+                {operationGroups.map((group) => (
+                  <li key={group.date || `empty-${group.operations[0]?.id}`} className="space-y-2">
+                    {group.isStandalone ? (
+                      <ul className="space-y-3">
+                        {group.operations.map((op) => (
+                          <li key={op.id}>
+                            <OperationRow
+                              operation={op}
+                              effectiveUkupnoVreme={effectiveUkupnoByOpId.get(op.id)}
+                              suggestedNapomene={suggestedNapomene}
+                              suggestedRadniNalozi={suggestedRadniNalozi}
+                              hideDate={false}
+                              hideTimeFields={false}
+                              onChange={(updated) => updateOperation(op.id, updated)}
+                              onRemove={() => removeOperation(op.id)}
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <>
+                        <div className="space-y-3 rounded-lg border-2 border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 px-4 py-3">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Label className="text-sm font-semibold shrink-0">Datum:</Label>
+                              <Input
+                                type="date"
+                                value={isNewGroupPlaceholder(group.date) ? "" : group.date}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                  updateGroupDate(
+                                    group.operations.map((o) => o.id),
+                                    e.target.value || ""
+                                  )
+                                }
+                                className="w-40 font-medium"
+                              />
+                              <span className="text-base font-bold text-[var(--color-foreground)]">
+                                {formatDateDisplay(group.date)}
+                              </span>
+                            </div>
+                            <span className="text-xs text-[var(--color-muted-foreground)]">
+                              Svi redovi ispod: samo Napomena i Radni nalog. Vreme (Od/Do) unesi ispod.
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => addOperationWithDate(group.date)}
+                              className="ml-auto"
+                            >
+                              + Dodaj red pod ovaj datum
+                            </Button>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 border-t border-[var(--color-border)]/50 pt-2">
+                            <span className="text-xs font-medium text-[var(--color-muted-foreground)]">
+                              Jedan blok vremena: Od i Do za ceo dan.
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <Label className="text-xs shrink-0">Od:</Label>
+                              <Input
+                                type="time"
+                                className="w-28"
+                                value={group.operations[0]?.pocetak ?? ""}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                  updateGroupTime(
+                                    group.operations.map((o) => o.id),
+                                    "pocetak",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Label className="text-xs shrink-0">Do:</Label>
+                              <Input
+                                type="time"
+                                className="w-28"
+                                value={group.operations[group.operations.length - 1]?.kraj ?? ""}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                  updateGroupTime(
+                                    group.operations.map((o) => o.id),
+                                    "kraj",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <ul className="space-y-3">
+                          {group.operations.map((op) => (
+                            <li key={op.id}>
+                              <OperationRow
+                                operation={op}
+                                effectiveUkupnoVreme={effectiveUkupnoByOpId.get(op.id)}
+                                hideTimeFields
+                                suggestedNapomene={suggestedNapomene}
+                                suggestedRadniNalozi={suggestedRadniNalozi}
+                                hideDate
+                                onChange={(updated) => updateOperation(op.id, updated)}
+                                onRemove={() => removeOperation(op.id)}
+                              />
+                            </li>
+                          ))}
+                        </ul>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="lg"
+                          onClick={() => addOperationWithDate(group.date)}
+                          className="w-full border-2 border-dashed border-[var(--color-primary)]/50 bg-[var(--color-primary)]/10 font-semibold py-6 hover:bg-[var(--color-primary)]/20"
+                        >
+                          <Plus className="mr-2 h-5 w-5" />
+                          Dodaj još jedan red (Napomena + Radni nalog) za ovaj datum
+                        </Button>
+                      </>
+                    )}
                   </li>
                 ))}
               </ul>
             )}
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={addOperation}>
+              <Button type="button" variant="outline" onClick={addDayGroup}>
+                <Calendar className="mr-2 h-4 w-4" />
+                Dodaj operacije za jedan dan
+              </Button>
+              <Button type="button" variant="outline" onClick={addStandaloneOperation}>
                 <Upload className="mr-2 h-4 w-4" />
-                + Dodaj operaciju
+                Dodaj pojedinačnu operaciju
               </Button>
               {editingCardId && (
                 <Button type="button" variant="secondary" onClick={handleCancelEdit}>
@@ -701,6 +959,14 @@ export default function App() {
                           )}
                         </p>
                         <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleExportSingleCard(card)}
+                          >
+                            <Download className="mr-2 h-4 w-4" />
+                            Izvezi
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"
@@ -914,17 +1180,24 @@ export default function App() {
             </CardHeader>
             <CardContent className="space-y-4 text-sm text-[var(--color-foreground)]">
               <p className="text-[var(--color-muted-foreground)]">
-                Aplikacija služi za evidenciju prekovremenog rada. Omogućava unos sati po radnicima, izvoz u Excel i obradu tabele sa vremenom.
+                Aplikacija služi za evidenciju prekovremenog rada po radnicima: unos sati, izvoz u Excel i obradu tabele sa vremenom.
               </p>
               <div>
-                <h4 className="font-semibold mb-2">Šta možete da radite</h4>
+                <h4 className="font-semibold mb-2">Dva načina unosa</h4>
+                <ul className="list-disc list-inside space-y-1.5 text-[var(--color-muted-foreground)]">
+                  <li><strong>Dodaj operacije za jedan dan</strong> — otvara zeleni blok. Unesete datum i vreme (Od / Do) u zaglavlju. U redovima ispod samo <strong>Napomena</strong> i <strong>Radni nalog</strong>. Dugme „Dodaj još jedan red” dodaje nove redove za isti datum.</li>
+                  <li><strong>Dodaj pojedinačnu operaciju</strong> — jedan pun red: Datum, Napomena, Radni nalog, Početak, Kraj, Ukupno vreme. Za operacije sa različitim datumima.</li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="font-semibold mb-2">Šta još možete</h4>
                 <ul className="list-disc list-inside space-y-1 text-[var(--color-muted-foreground)]">
-                  <li>Unos prekovremenog rada po radnicima (datum, početak, kraj)</li>
-                  <li>Razlika između radnih dana i vikenda</li>
+                  <li>Napomena i Radni nalog nude ranije korišćene vrednosti (predlog)</li>
+                  <li>Razlika između radnih dana i vikenda (zbir i u Excelu)</li>
                   <li>Dve firme — MR Engines i TikiVent (odvojeni podaci)</li>
-                  <li>Izvoz u Excel sa nazivom firme</li>
-                  <li>Uvoz tabele sa vremenom — oduzima uneto vreme od „Posle smene”</li>
-                  <li>Backup i restore svih podataka</li>
+                  <li>Izvoz cele tabele u Excel ili <strong>izvoz samo jedne kartice</strong> (dugme Izvezi na kartici)</li>
+                  <li>Uvoz tabele sa vremenom — oduzima uneto vreme (radni dani) od „Posle smene”</li>
+                  <li>Backup i restore svih podataka (Podešavanja)</li>
                 </ul>
               </div>
               <div>
@@ -932,15 +1205,15 @@ export default function App() {
                 <ol className="list-decimal list-inside space-y-2 text-[var(--color-muted-foreground)]">
                   <li>Izaberite firmu (MR Engines ili TikiVent).</li>
                   <li>U Podešavanjima dodajte radnike za tu firmu.</li>
-                  <li>Unesite operacije — datum, početak, kraj. Možete unositi i vikend.</li>
-                  <li>Sačuvajte karticu (Ctrl+S).</li>
-                  <li>Izvezite u Excel (Ctrl+E) ili uvezite tabelu sa vremenom da obrađujete.</li>
+                  <li>Izaberite radnika i dodajte operacije (za jedan dan ili pojedinačne). Sačuvajte karticu (Ctrl+S).</li>
+                  <li>Pregledajte sačuvane kartice. Izvezite u Excel (Ctrl+E) ili pojedinačnu karticu (Izvezi).</li>
+                  <li>Po potrebi uvezite tabelu sa vremenom da se vrednosti „Posle smene” ažuriraju.</li>
                 </ol>
               </div>
               <div>
                 <h4 className="font-semibold mb-2">Uvoz tabele</h4>
                 <p className="text-[var(--color-muted-foreground)]">
-                  Kada uvezete Excel sa kolonama Ime, Prezime i Posle smene, aplikacija za svakog pronađenog radnika oduzima njegovo uneto vreme (samo radni dani) od vrednosti „Posle smene” i preuzima izmenjenu tabelu.
+                  Excel sa kolonama Ime, Prezime i Posle smene: za svakog pronađenog radnika aplikacija oduzima njegovo uneto vreme (samo radni dani) od „Posle smene” i preuzimate izmenjenu tabelu.
                 </p>
               </div>
             </CardContent>

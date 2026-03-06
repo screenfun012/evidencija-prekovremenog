@@ -17,6 +17,8 @@ export interface Operation {
   pocetak: string; // HH:MM
   kraj: string;   // HH:MM
   ukupnoVreme: number; // hours (decimal)
+  /** true = pojedinačna operacija (pun red: datum, napomena, nalog, od–do, ukupno) */
+  isStandalone?: boolean;
 }
 
 /** Sačuvana kartica za jednog radnika (jedan sheet u Excelu). */

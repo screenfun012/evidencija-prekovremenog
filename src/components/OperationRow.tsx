@@ -9,6 +9,16 @@ import type { Operation } from "@/types";
 
 interface OperationRowProps {
   operation: Operation;
+  /** Efektivno ukupno vreme kada grupa koristi jedan blok (Od na prvom, Do na poslednjem) */
+  effectiveUkupnoVreme?: number;
+  /** Kada je true, vreme je u zaglavlju grupe (Od/Do) – prikaži samo Napomena i Radni nalog */
+  hideTimeFields?: boolean;
+  /** Ranije korišćene napomene za predlog */
+  suggestedNapomene?: string[];
+  /** Ranije korišćeni radni nalozi za predlog */
+  suggestedRadniNalozi?: string[];
+  /** Sakrij polje za datum (kada je red unutar grupe po datumu) */
+  hideDate?: boolean;
   onChange: (op: Operation) => void;
   onRemove: () => void;
 }
@@ -31,7 +41,7 @@ function isValidTime(s: string): boolean {
   return h >= 0 && h <= 23 && min >= 0 && min <= 59;
 }
 
-export function OperationRow({ operation, onChange, onRemove }: OperationRowProps) {
+export function OperationRow({ operation, effectiveUkupnoVreme, hideTimeFields = false, suggestedNapomene = [], suggestedRadniNalozi = [], hideDate = false, onChange, onRemove }: OperationRowProps) {
   const pocetakRef = useRef<HTMLInputElement>(null);
   const krajRef = useRef<HTMLInputElement>(null);
 
@@ -81,28 +91,48 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
     }
   }, [operation, onChange, recalcTime]);
 
+  const showTimeFields = !hideTimeFields;
+
+  const gridCols =
+    hideTimeFields && hideDate
+      ? "lg:grid-cols-[1fr_1fr_auto]"
+      : hideDate
+        ? "lg:grid-cols-[1fr_1fr_80px_80px_auto_auto]"
+        : "lg:grid-cols-[1fr_1fr_1fr_80px_80px_auto_auto]";
+
   return (
     <div
       className={cn(
         "grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-4",
-        "grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_80px_80px_auto_auto]"
+        "grid-cols-1 sm:grid-cols-2",
+        gridCols
       )}
     >
-      <div className="space-y-1.5">
-        <Label>Datum</Label>
-        <Input
-          type="date"
-          value={operation.datum}
-          onChange={handleDatumChange}
-        />
-      </div>
+      {!hideDate && (
+        <div className="space-y-1.5">
+          <Label>Datum</Label>
+          <Input
+            type="date"
+            value={operation.datum}
+            onChange={handleDatumChange}
+          />
+        </div>
+      )}
       <div className="space-y-1.5">
         <Label>Napomena</Label>
         <Input
           value={operation.napomena}
           onChange={(e) => onChange({ ...operation, napomena: e.target.value })}
           placeholder="Napomena"
+          list={suggestedNapomene.length > 0 ? `napomena-${operation.id}` : undefined}
         />
+        {suggestedNapomene.length > 0 && (
+          <datalist id={`napomena-${operation.id}`}>
+            {suggestedNapomene.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+        )}
       </div>
       <div className="space-y-1.5">
         <Label>Radni nalog</Label>
@@ -110,36 +140,48 @@ export function OperationRow({ operation, onChange, onRemove }: OperationRowProp
           value={operation.radniNalog}
           onChange={(e) => onChange({ ...operation, radniNalog: e.target.value })}
           placeholder="Radni nalog"
+          list={suggestedRadniNalozi.length > 0 ? `radninalog-${operation.id}` : undefined}
         />
+        {suggestedRadniNalozi.length > 0 && (
+          <datalist id={`radninalog-${operation.id}`}>
+            {suggestedRadniNalozi.map((r) => (
+              <option key={r} value={r} />
+            ))}
+          </datalist>
+        )}
       </div>
-      <div className="space-y-1.5">
-        <Label>Početak</Label>
-        <Input
-          ref={pocetakRef}
-          type="time"
-          value={operation.pocetak}
-          onChange={handleTimeChange("pocetak")}
-          onBlur={handleTimeBlur}
-          onClick={handleTimeClick("pocetak")}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label>Kraj</Label>
-        <Input
-          ref={krajRef}
-          type="time"
-          value={operation.kraj}
-          onChange={handleTimeChange("kraj")}
-          onBlur={handleTimeBlur}
-          onClick={handleTimeClick("kraj")}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label>Ukupno vreme</Label>
-        <div className="flex h-9 items-center rounded-md border border-[var(--color-input)] bg-[var(--color-muted)]/50 px-3 text-sm">
-          {formatHours(operation.ukupnoVreme)}
-        </div>
-      </div>
+      {showTimeFields && (
+        <>
+          <div className="space-y-1.5">
+            <Label>Početak</Label>
+            <Input
+              ref={pocetakRef}
+              type="time"
+              value={operation.pocetak}
+              onChange={handleTimeChange("pocetak")}
+              onBlur={handleTimeBlur}
+              onClick={handleTimeClick("pocetak")}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Kraj</Label>
+            <Input
+              ref={krajRef}
+              type="time"
+              value={operation.kraj}
+              onChange={handleTimeChange("kraj")}
+              onBlur={handleTimeBlur}
+              onClick={handleTimeClick("kraj")}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Ukupno vreme</Label>
+            <div className="flex h-9 items-center rounded-md border border-[var(--color-input)] bg-[var(--color-muted)]/50 px-3 text-sm">
+              {formatHours(effectiveUkupnoVreme !== undefined ? effectiveUkupnoVreme : operation.ukupnoVreme)}
+            </div>
+          </div>
+        </>
+      )}
       <div className="flex items-end pb-0 sm:pb-0">
         <Button
           type="button"
